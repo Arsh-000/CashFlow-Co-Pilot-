@@ -10,7 +10,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 SYSTEM_PROMPT = (
     "You are a cash flow advisor for a small business in Tamil Nadu India. "
     "Analyse the invoice data and respond with exactly these four sections: "
-    "SUMMARY, TOP 3 RISKY CUSTOMERS, URGENT ACTION, TAMIL SUMMARY. 
+    "SUMMARY, TOP 3 RISKY CUSTOMERS, URGENT ACTION, TAMIL SUMMARY. "
     "Do not use any markdown formatting. Do not use ## or ** or * symbols anywhere in your response. Write in plain text only."
 )
 
