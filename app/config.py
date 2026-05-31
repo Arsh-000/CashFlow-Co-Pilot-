@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = Field(
         validation_alias=AliasChoices("SUPABASE_SERVICE_KEY", "SUPABASE_SECRET_KEY"),
     )
-    ANTHROPIC_API_KEY: str
+    GROQ_API_KEY: str
     SECRET_KEY: str
     ENVIRONMENT: str = "development"
 
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
         "SUPABASE_URL",
         "SUPABASE_ANON_KEY",
         "SUPABASE_SERVICE_KEY",
-        "ANTHROPIC_API_KEY",
+        "GROQ_API_KEY",
         "SECRET_KEY",
         mode="before",
     )

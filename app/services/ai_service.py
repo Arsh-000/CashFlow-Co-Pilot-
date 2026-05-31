@@ -1,11 +1,11 @@
 import json
 import re
 
-import anthropic
+import httpx
 
 from app.config import settings
 
-client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_PROMPT = (
     "You are a cash flow advisor for a small business in Tamil Nadu India. "
@@ -21,14 +21,24 @@ def generate_insights(invoices: list[dict], metrics: dict) -> str:
         "Provide your analysis in the four required sections."
     )
 
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
+    response = httpx.post(
+        GROQ_URL,
+        headers={
+            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "llama-3.3-70b-versatile",
+            "max_tokens": 1000,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        },
+        timeout=60.0,
     )
-
-    return message.content[0].text
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"]
 
 
 def parse_insight_sections(text: str) -> dict:
