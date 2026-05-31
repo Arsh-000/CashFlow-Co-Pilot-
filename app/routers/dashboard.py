@@ -39,7 +39,8 @@ async def summary(current_user: dict = Depends(get_current_user)):
 
     return {
         "metrics": metrics,
-        "customer_summaries": customer_summaries,
+        "customers": customer_summaries,
         "invoices": invoices,
         "latest_insight": latest_insight,
     }
+    
