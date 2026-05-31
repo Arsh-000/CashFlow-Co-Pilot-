@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database import supabase
@@ -28,26 +30,41 @@ async def generate(current_user: dict = Depends(get_current_user)):
     business_id = current_user["business_id"]
     invoices = _fetch_invoices(business_id)
 
+    if not invoices:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No invoices found. Upload invoices first.",
+        )
+
     metrics = compute_metrics(invoices)
     customer_summaries = compute_customer_summaries(invoices)
 
     raw_insights = generate_insights(invoices, metrics)
     parsed = parse_insight_sections(raw_insights)
 
+    top_risks = parsed["top_risks"]
+    if isinstance(top_risks, list):
+        top_risks_json = top_risks
+    else:
+        top_risks_json = [top_risks] if top_risks else []
+
     insight_record = {
         "business_id": business_id,
         "summary": parsed["summary"],
-        "top_risks": parsed["top_risks"],
+        "top_risks": top_risks_json,
         "urgent_action": parsed["urgent_action"],
         "tamil_summary": parsed["tamil_summary"],
-        "raw_content": raw_insights,
+        "raw_response": raw_insights,
     }
     stored = supabase.table("insights").insert(insight_record).execute()
 
     return {
         "metrics": metrics,
-        "customer_summaries": customer_summaries,
-        "insights": parsed,
+        "customers": customer_summaries,
+        "summary": parsed["summary"],
+        "top_risks": top_risks_json,
+        "urgent_action": parsed["urgent_action"],
+        "tamil_summary": parsed["tamil_summary"],
         "raw_insights": raw_insights,
         "insight_id": stored.data[0]["id"] if stored.data else None,
     }
@@ -71,3 +88,4 @@ async def latest(current_user: dict = Depends(get_current_user)):
         )
 
     return response.data[0]
+    
