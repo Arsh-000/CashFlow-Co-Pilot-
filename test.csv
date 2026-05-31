@@ -1,0 +1,3 @@
+﻿customer_name,invoice_number,invoice_date,due_date,amount,paid_amount,status
+Arsh Test,INV-001,2025-01-15,2025-02-15,185000,0,unpaid
+Arsh Test,INV-002,2025-02-01,2025-03-01,142000,0,unpaid

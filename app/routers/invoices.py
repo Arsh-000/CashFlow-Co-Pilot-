@@ -28,6 +28,17 @@ def _find_or_create_customer(business_id: str, customer_name: str) -> str:
     return created.data[0]["id"]
 
 
+def _invoice_exists(business_id: str, invoice_number: str) -> bool:
+    result = (
+        supabase.table("invoices")
+        .select("id")
+        .eq("business_id", business_id)
+        .eq("invoice_number", invoice_number)
+        .execute()
+    )
+    return bool(result.data)
+
+
 @router.post("/upload/csv")
 async def upload_csv(
     file: UploadFile = File(...),
@@ -43,10 +54,18 @@ async def upload_csv(
     reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
     business_id = current_user["business_id"]
     inserted = 0
+    skipped = 0
 
     for row in reader:
         customer_name = row.get("customer_name") or row.get("customer") or row.get("name")
         if not customer_name:
+            continue
+
+        invoice_number = row.get("invoice_number", "").strip()
+
+        # Skip if invoice already exists for this business
+        if invoice_number and _invoice_exists(business_id, invoice_number):
+            skipped += 1
             continue
 
         customer_id = _find_or_create_customer(business_id, customer_name.strip())
@@ -61,13 +80,17 @@ async def upload_csv(
             "status": row.get("status", "unpaid"),
         }
 
-        if row.get("invoice_number"):
-            invoice_data["invoice_number"] = row["invoice_number"].strip()
+        if invoice_number:
+            invoice_data["invoice_number"] = invoice_number
 
         supabase.table("invoices").insert(invoice_data).execute()
         inserted += 1
 
-    return {"message": f"Successfully imported {inserted} invoices"}
+    return {
+        "message": f"Successfully imported {inserted} invoices",
+        "inserted": inserted,
+        "skipped": skipped,
+    }
 
 
 @router.get("/list")
