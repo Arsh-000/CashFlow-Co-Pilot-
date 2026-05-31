@@ -26,10 +26,12 @@ def compute_customer_summaries(invoices: list[dict]) -> list[dict]:
 
         name = invoice.get("customer_name") or invoice.get("customers", {}).get("name", "Unknown")
         amount = float(invoice.get("amount", 0))
+        paid = float(invoice.get("paid_amount", 0))
+        outstanding = amount - paid
         due_date = invoice.get("due_date", "")
         days_overdue = get_days_overdue(due_date) if due_date else 0
 
-        customers[name]["total_outstanding"] += amount
+        customers[name]["total_outstanding"] += outstanding
         customers[name]["max_days_overdue"] = max(
             customers[name]["max_days_overdue"], days_overdue
         )
@@ -39,7 +41,7 @@ def compute_customer_summaries(invoices: list[dict]) -> list[dict]:
         risk_level = score_risk_level(data["max_days_overdue"])
         summaries.append(
             {
-                "customer_name": name,
+                "name": name,
                 "total_outstanding": round(data["total_outstanding"], 2),
                 "max_days_overdue": data["max_days_overdue"],
                 "risk_level": risk_level,
@@ -58,19 +60,21 @@ def compute_metrics(invoices: list[dict]) -> dict:
 
     for invoice in invoices:
         amount = float(invoice.get("amount", 0))
+        paid = float(invoice.get("paid_amount", 0))
         status = invoice.get("status", "unpaid")
         due_date = invoice.get("due_date", "")
 
-        if status == "paid":
-            amount_collected += amount
-        else:
-            total_receivables += amount
+        total_receivables += amount
+        amount_collected += paid
+
+        if status != "paid":
+            outstanding = amount - paid
             days_overdue = get_days_overdue(due_date) if due_date else 0
             if days_overdue > 0:
-                overdue_amount += amount
+                overdue_amount += outstanding
             risk = score_risk_level(days_overdue)
             if risk in ("Red", "Amber"):
-                at_risk_amount += amount
+                at_risk_amount += outstanding
 
     return {
         "total_receivables": round(total_receivables, 2),
@@ -78,3 +82,5 @@ def compute_metrics(invoices: list[dict]) -> dict:
         "overdue_amount": round(overdue_amount, 2),
         "at_risk_amount": round(at_risk_amount, 2),
     }
+
+    
