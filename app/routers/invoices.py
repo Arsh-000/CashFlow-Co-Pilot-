@@ -54,12 +54,15 @@ async def upload_csv(
         invoice_data = {
             "business_id": business_id,
             "customer_id": customer_id,
-            "amount": float(row.get("amount", 0)),
+            "amount": float(row.get("amount", 0) or 0),
+            "paid_amount": float(row.get("paid_amount", 0) or 0),
             "due_date": row.get("due_date", ""),
+            "invoice_date": row.get("invoice_date", ""),
             "status": row.get("status", "unpaid"),
         }
+
         if row.get("invoice_number"):
-            invoice_data["invoice_number"] = row["invoice_number"]
+            invoice_data["invoice_number"] = row["invoice_number"].strip()
 
         supabase.table("invoices").insert(invoice_data).execute()
         inserted += 1
