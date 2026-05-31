@@ -13,9 +13,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SUPABASE_SERVICE_KEY", "SUPABASE_SECRET_KEY"),
     )
     GROQ_API_KEY: str
-    TWILIO_ACCOUNT_SID: str
-    TWILIO_AUTH_TOKEN: str
-    TWILIO_WHATSAPP_FROM: str
+    TWILIO_ACCOUNT_SID: str | None = None
+    TWILIO_AUTH_TOKEN: str | None = None
+    TWILIO_WHATSAPP_FROM: str | None = None
     SECRET_KEY: str
     ENVIRONMENT: str = "development"
 
@@ -29,9 +29,6 @@ class Settings(BaseSettings):
         "SUPABASE_ANON_KEY",
         "SUPABASE_SERVICE_KEY",
         "GROQ_API_KEY",
-        "TWILIO_ACCOUNT_SID",
-        "TWILIO_AUTH_TOKEN",
-        "TWILIO_WHATSAPP_FROM",
         "SECRET_KEY",
         mode="before",
     )
