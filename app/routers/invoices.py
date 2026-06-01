@@ -9,20 +9,28 @@ from app.middleware.auth_middleware import get_current_user
 router = APIRouter()
 
 
-def _find_or_create_customer(business_id: str, customer_name: str) -> str:
+def _find_or_create_customer(business_id: str, customer_name: str, phone: str | None = None) -> str:
     existing = (
         supabase.table("customers")
-        .select("id")
+        .select("id, phone")
         .eq("business_id", business_id)
         .eq("name", customer_name)
         .execute()
     )
     if existing.data:
-        return existing.data[0]["id"]
+        customer_id = existing.data[0]["id"]
+        # Update phone if we now have one and didn't before
+        if phone and not existing.data[0].get("phone"):
+            supabase.table("customers").update({"phone": phone}).eq("id", customer_id).execute()
+        return customer_id
+
+    customer_data: dict = {"business_id": business_id, "name": customer_name}
+    if phone:
+        customer_data["phone"] = phone
 
     created = (
         supabase.table("customers")
-        .insert({"business_id": business_id, "name": customer_name})
+        .insert(customer_data)
         .execute()
     )
     return created.data[0]["id"]
@@ -82,7 +90,8 @@ async def upload_csv(
             skipped += 1
             continue
 
-        customer_id = _find_or_create_customer(business_id, customer_name.strip())
+        phone = row.get("phone", "").strip() or None
+        customer_id = _find_or_create_customer(business_id, customer_name.strip(), phone)
 
         invoice_data = {
             "business_id": business_id,
