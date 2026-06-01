@@ -19,9 +19,14 @@ def _find_or_create_customer(business_id: str, customer_name: str, phone: str | 
     )
     if existing.data:
         customer_id = existing.data[0]["id"]
-        # Update phone if we now have one and didn't before
+        # Only update phone if we have one and the customer doesn't
         if phone and not existing.data[0].get("phone"):
-            supabase.table("customers").upsert({"id": customer_id, "phone": phone}).execute()
+            supabase.table("customers").upsert({
+                "id": customer_id,
+                "business_id": business_id,
+                "name": customer_name,
+                "phone": phone,
+            }, on_conflict="id").execute()
         return customer_id
 
     customer_data: dict = {"business_id": business_id, "name": customer_name}
@@ -48,7 +53,6 @@ def _invoice_exists(business_id: str, invoice_number: str) -> bool:
 
 
 def _parse_date(value: str) -> str | None:
-    """Return date string if valid, else None. Supabase rejects empty strings for date columns."""
     if not value or not value.strip():
         return None
     return value.strip()
@@ -85,7 +89,6 @@ async def upload_csv(
 
         invoice_number = row.get("invoice_number", "").strip()
 
-        # Skip if invoice already exists for this business
         if invoice_number and _invoice_exists(business_id, invoice_number):
             skipped += 1
             continue
