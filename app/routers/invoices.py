@@ -21,7 +21,7 @@ def _find_or_create_customer(business_id: str, customer_name: str, phone: str | 
         customer_id = existing.data[0]["id"]
         # Update phone if we now have one and didn't before
         if phone and not existing.data[0].get("phone"):
-            supabase.table("customers").update({"phone": phone}).eq("id", customer_id).execute()
+            supabase.table("customers").upsert({"id": customer_id, "phone": phone}).execute()
         return customer_id
 
     customer_data: dict = {"business_id": business_id, "name": customer_name}
