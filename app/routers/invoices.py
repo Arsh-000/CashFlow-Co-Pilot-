@@ -12,22 +12,13 @@ router = APIRouter()
 def _find_or_create_customer(business_id: str, customer_name: str, phone: str | None = None) -> str:
     existing = (
         supabase.table("customers")
-        .select("id, phone")
+        .select("id")
         .eq("business_id", business_id)
         .eq("name", customer_name)
         .execute()
     )
     if existing.data:
-        customer_id = existing.data[0]["id"]
-        # Only update phone if we have one and the customer doesn't
-        if phone and not existing.data[0].get("phone"):
-            supabase.table("customers").upsert({
-                "id": customer_id,
-                "business_id": business_id,
-                "name": customer_name,
-                "phone": phone,
-            }, on_conflict="id").execute()
-        return customer_id
+        return existing.data[0]["id"]
 
     customer_data: dict = {"business_id": business_id, "name": customer_name}
     if phone:
