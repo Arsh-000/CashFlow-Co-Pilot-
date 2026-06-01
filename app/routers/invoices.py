@@ -39,6 +39,20 @@ def _invoice_exists(business_id: str, invoice_number: str) -> bool:
     return bool(result.data)
 
 
+def _parse_date(value: str) -> str | None:
+    """Return date string if valid, else None. Supabase rejects empty strings for date columns."""
+    if not value or not value.strip():
+        return None
+    return value.strip()
+
+
+def _parse_float(value: str) -> float:
+    try:
+        return float(value or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 @router.post("/upload/csv")
 async def upload_csv(
     file: UploadFile = File(...),
@@ -73,11 +87,11 @@ async def upload_csv(
         invoice_data = {
             "business_id": business_id,
             "customer_id": customer_id,
-            "amount": float(row.get("amount", 0) or 0),
-            "paid_amount": float(row.get("paid_amount", 0) or 0),
-            "due_date": row.get("due_date", ""),
-            "invoice_date": row.get("invoice_date", ""),
-            "status": row.get("status", "unpaid"),
+            "amount": _parse_float(row.get("amount")),
+            "paid_amount": _parse_float(row.get("paid_amount")),
+            "due_date": _parse_date(row.get("due_date")),
+            "invoice_date": _parse_date(row.get("invoice_date")),
+            "status": row.get("status", "unpaid").strip() or "unpaid",
         }
 
         if invoice_number:
