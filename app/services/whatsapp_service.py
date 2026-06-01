@@ -58,6 +58,7 @@ def build_owner_summary(
     metrics: dict,
     top_risks: list[dict],
     insight_summary: str,
+    forecast: dict | None = None,
 ) -> str:
     risky_lines_en = []
     risky_lines_ta = []
@@ -74,12 +75,39 @@ def build_owner_summary(
     summary_text = insight_summary.strip() if insight_summary else "No AI insights generated yet."
     summary_ta = insight_summary.strip() if insight_summary else "இன்னும் AI நுண்ணறிவு உருவாக்கப்படவில்லை."
 
+    # Build forecast section
+    forecast_en = ""
+    forecast_ta = ""
+    if forecast:
+        f_summary = forecast.get("summary", {})
+        lowest_balance = format_inr(float(forecast.get("lowest_balance", 0)))
+        lowest_date = forecast.get("lowest_balance_date", "N/A")
+        expected = format_inr(float(f_summary.get("total_expected_inflow", 0)))
+        shortage = forecast.get("shortage_date")
+
+        shortage_en = f"⚠️ Cash shortage on {shortage}" if shortage else "✅ No cash shortage predicted"
+        shortage_ta = f"⚠️ பண பற்றாக்குறை: {shortage}" if shortage else "✅ பண பற்றாக்குறை இல்லை"
+
+        forecast_en = (
+            f"\n*30-Day Forecast:*\n"
+            f"Expected Collections: {expected}\n"
+            f"Lowest Balance: {lowest_balance} on {lowest_date}\n"
+            f"{shortage_en}"
+        )
+        forecast_ta = (
+            f"\n*30 நாள் முன்னறிவிப்பு:*\n"
+            f"எதிர்பார்க்கப்படும் வசூல்: {expected}\n"
+            f"குறைந்தபட்ச இருப்பு: {lowest_balance} ({lowest_date})\n"
+            f"{shortage_ta}"
+        )
+
     english = (
         f"*Weekly Cash Summary — {business_name}*\n\n"
         f"Total Receivables: {format_inr(metrics['total_receivables'])}\n"
         f"Amount Collected: {format_inr(metrics['amount_collected'])}\n"
         f"Overdue Amount: {format_inr(metrics['overdue_amount'])}\n"
-        f"At Risk Amount: {format_inr(metrics['at_risk_amount'])}\n\n"
+        f"At Risk Amount: {format_inr(metrics['at_risk_amount'])}\n"
+        f"{forecast_en}\n\n"
         f"*Top 3 Risky Customers:*\n{risky_en}\n\n"
         f"*AI Insight:*\n{summary_text}"
     )
@@ -89,7 +117,8 @@ def build_owner_summary(
         f"மொத்த பெறத்தக்க தொகை: {format_inr(metrics['total_receivables'])}\n"
         f"வசூலிக்கப்பட்ட தொகை: {format_inr(metrics['amount_collected'])}\n"
         f"தாமதமான தொகை: {format_inr(metrics['overdue_amount'])}\n"
-        f"ஆபத்தில் உள்ள தொகை: {format_inr(metrics['at_risk_amount'])}\n\n"
+        f"ஆபத்தில் உள்ள தொகை: {format_inr(metrics['at_risk_amount'])}\n"
+        f"{forecast_ta}\n\n"
         f"*முதல் 3 ஆபத்தான வாடிக்கையாளர்கள்:*\n{risky_ta}\n\n"
         f"*AI நுண்ணறிவு:*\n{summary_ta}"
     )
