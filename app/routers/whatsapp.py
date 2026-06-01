@@ -101,28 +101,29 @@ async def send_reminders(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
     business_name = business_response.data[0]["name"]
 
+    # Send to ALL customers with a phone number — not just Red/Amber
     customers_response = (
         supabase.table("customers")
         .select("id, name, phone, risk_level")
         .eq("business_id", business_id)
         .execute()
     )
-    at_risk_customers = [
-        c
-        for c in (customers_response.data or [])
-        if c.get("risk_level") in ("Red", "Amber") and c.get("phone")
+    customers_with_phone = [
+        c for c in (customers_response.data or [])
+        if c.get("phone")
     ]
 
-    if not at_risk_customers:
+    if not customers_with_phone:
         return {"status": "no_customers", "sent": 0, "results": []}
 
     invoices = _fetch_invoices(business_id)
     results = []
 
-    for customer in at_risk_customers:
+    for customer in customers_with_phone:
         customer_invoices = [
             inv for inv in invoices if inv.get("customer_id") == customer["id"]
         ]
+        # Only send if customer has unpaid invoices
         if not any(inv.get("status") != "paid" for inv in customer_invoices):
             continue
 
