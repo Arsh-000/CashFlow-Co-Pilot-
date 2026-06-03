@@ -234,3 +234,95 @@ async def list_invoices(current_user: dict = Depends(get_current_user)):
         invoices.append({**row, "customer_name": customer_name})
 
     return invoices
+
+
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg": "image/jpeg",
+    "image/jpg": "image/jpeg",
+    "image/png": "image/png",
+    "image/webp": "image/webp",
+    "image/gif": "image/gif",
+}
+
+
+@router.post("/upload/image")
+async def upload_image(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    from app.services.ocr_service import extract_invoices_from_image
+
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {content_type}. Supported: JPEG, PNG, WEBP, GIF",
+        )
+
+    image_bytes = await file.read()
+    if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 10MB",
+        )
+
+    # Extract invoice data from image
+    try:
+        extracted_rows = await extract_invoices_from_image(
+            image_bytes=image_bytes,
+            media_type=ALLOWED_IMAGE_TYPES[content_type],
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
+
+    if not extracted_rows:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No invoice data found in image",
+        )
+
+    # Insert extracted rows using same logic as CSV upload
+    business_id = current_user["business_id"]
+    inserted = 0
+    skipped = 0
+
+    for row in extracted_rows:
+        customer_name = row.get("customer_name", "").strip()
+        if not customer_name:
+            continue
+
+        invoice_number = str(row.get("invoice_number", "")).strip()
+
+        if invoice_number and _invoice_exists(business_id, invoice_number):
+            skipped += 1
+            continue
+
+        phone = str(row.get("phone", "")).strip() or None
+        customer_id = _find_or_create_customer(business_id, customer_name, phone)
+
+        invoice_data = {
+            "business_id": business_id,
+            "customer_id": customer_id,
+            "amount": float(row.get("amount") or 0),
+            "paid_amount": float(row.get("paid_amount") or 0),
+            "due_date": row.get("due_date") or None,
+            "invoice_date": row.get("invoice_date") or None,
+            "status": row.get("status", "unpaid") or "unpaid",
+        }
+
+        if invoice_number:
+            invoice_data["invoice_number"] = invoice_number
+
+        supabase.table("invoices").insert(invoice_data).execute()
+        inserted += 1
+
+    return {
+        "message": f"Successfully extracted and imported {inserted} invoices from image",
+        "inserted": inserted,
+        "skipped": skipped,
+        "extracted_data": extracted_rows,
+    }
+    
