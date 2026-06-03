@@ -1,7 +1,9 @@
 import csv
 import io
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
 
 from app.database import supabase
 from app.middleware.auth_middleware import get_current_user
@@ -56,6 +58,21 @@ def _parse_float(value: str) -> float:
         return 0.0
 
 
+def _compute_days_from_due(due_date_str: str, payment_date: date) -> int | None:
+    if not due_date_str:
+        return None
+    try:
+        due = datetime.strptime(due_date_str[:10], "%Y-%m-%d").date()
+        return (payment_date - due).days
+    except ValueError:
+        return None
+
+
+class MarkPaidRequest(BaseModel):
+    amount_paid: float
+    payment_date: str | None = None  # YYYY-MM-DD, defaults to today
+
+
 @router.post("/upload/csv")
 async def upload_csv(
     file: UploadFile = File(...),
@@ -107,6 +124,77 @@ async def upload_csv(
         "message": f"Successfully imported {inserted} invoices",
         "inserted": inserted,
         "skipped": skipped,
+    }
+
+
+@router.post("/{invoice_id}/mark-paid")
+async def mark_paid(
+    invoice_id: str,
+    body: MarkPaidRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    business_id = current_user["business_id"]
+
+    # Fetch the invoice — verify it belongs to this business
+    invoice_response = (
+        supabase.table("invoices")
+        .select("id, business_id, customer_id, amount, paid_amount, due_date, status")
+        .eq("id", invoice_id)
+        .eq("business_id", business_id)
+        .execute()
+    )
+
+    if not invoice_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found",
+        )
+
+    invoice = invoice_response.data[0]
+
+    # Determine payment date
+    if body.payment_date:
+        payment_date = datetime.strptime(body.payment_date[:10], "%Y-%m-%d").date()
+    else:
+        payment_date = date.today()
+
+    # Compute new paid_amount and status
+    new_paid_amount = float(invoice["paid_amount"] or 0) + body.amount_paid
+    total_amount = float(invoice["amount"] or 0)
+
+    if new_paid_amount >= total_amount:
+        new_status = "paid"
+        new_paid_amount = total_amount  # cap at invoice amount
+    else:
+        new_status = "partial"
+
+    # Update invoice
+    supabase.table("invoices").upsert({
+        "id": invoice_id,
+        "paid_amount": new_paid_amount,
+        "status": new_status,
+        "payment_date": payment_date.isoformat(),
+    }, on_conflict="id").execute()
+
+    # Record payment event
+    days_from_due = _compute_days_from_due(invoice.get("due_date"), payment_date)
+
+    supabase.table("payment_events").insert({
+        "invoice_id": invoice_id,
+        "business_id": business_id,
+        "customer_id": invoice["customer_id"],
+        "payment_date": payment_date.isoformat(),
+        "amount_paid": body.amount_paid,
+        "days_from_due_date": days_from_due,
+    }).execute()
+
+    return {
+        "status": "updated",
+        "invoice_id": invoice_id,
+        "new_status": new_status,
+        "paid_amount": new_paid_amount,
+        "payment_date": payment_date.isoformat(),
+        "days_from_due_date": days_from_due,
     }
 
 
