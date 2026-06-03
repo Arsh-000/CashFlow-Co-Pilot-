@@ -2,11 +2,24 @@ import csv
 import io
 from datetime import date, datetime
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from app.config import settings
 from app.database import supabase
 from app.middleware.auth_middleware import get_current_user
+
+_REST_URL = f"{settings.SUPABASE_URL}/rest/v1"
+_SERVICE_KEY = settings.SUPABASE_SERVICE_KEY.strip()
+
+def _db_headers():
+    return {
+        "apikey": _SERVICE_KEY,
+        "Authorization": f"Bearer {_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
 
 router = APIRouter()
 
@@ -168,24 +181,32 @@ async def mark_paid(
     else:
         new_status = "partial"
 
-    # Update invoice
-    supabase.table("invoices").update({
-        "paid_amount": new_paid_amount,
-        "status": new_status,
-        "payment_date": payment_date.isoformat(),
-    }).eq("id", invoice_id).execute()
-
-    # Record payment event
+    # Update invoice via httpx (supabase client doesn't support update/upsert)
     days_from_due = _compute_days_from_due(invoice.get("due_date"), payment_date)
 
-    supabase.table("payment_events").insert({
-        "invoice_id": invoice_id,
-        "business_id": business_id,
-        "customer_id": invoice["customer_id"],
-        "payment_date": payment_date.isoformat(),
-        "amount_paid": body.amount_paid,
-        "days_from_due_date": days_from_due,
-    }).execute()
+    async with httpx.AsyncClient() as client:
+        await client.patch(
+            f"{_REST_URL}/invoices",
+            headers=_db_headers(),
+            params={"id": f"eq.{invoice_id}"},
+            json={
+                "paid_amount": new_paid_amount,
+                "status": new_status,
+                "payment_date": payment_date.isoformat(),
+            },
+        )
+        await client.post(
+            f"{_REST_URL}/payment_events",
+            headers=_db_headers(),
+            json={
+                "invoice_id": invoice_id,
+                "business_id": business_id,
+                "customer_id": invoice["customer_id"],
+                "payment_date": payment_date.isoformat(),
+                "amount_paid": body.amount_paid,
+                "days_from_due_date": days_from_due,
+            },
+        )
 
     return {
         "status": "updated",
