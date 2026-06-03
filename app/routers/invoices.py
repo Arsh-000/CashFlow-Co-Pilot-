@@ -169,12 +169,11 @@ async def mark_paid(
         new_status = "partial"
 
     # Update invoice
-    supabase.table("invoices").upsert({
-        "id": invoice_id,
+    supabase.table("invoices").update({
         "paid_amount": new_paid_amount,
         "status": new_status,
         "payment_date": payment_date.isoformat(),
-    }, on_conflict="id").execute()
+    }).eq("id", invoice_id).execute()
 
     # Record payment event
     days_from_due = _compute_days_from_due(invoice.get("due_date"), payment_date)
