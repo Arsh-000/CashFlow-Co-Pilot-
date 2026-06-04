@@ -219,19 +219,41 @@ async def mark_paid(
 
 
 @router.get("/list")
-async def list_invoices(current_user: dict = Depends(get_current_user)):
-    response = (
+async def list_invoices(
+    current_user: dict = Depends(get_current_user),
+    search: str | None = None,
+    status: str | None = None,
+    customer_id: str | None = None,
+):
+    query = (
         supabase.table("invoices")
         .select("*, customers(name)")
         .eq("business_id", current_user["business_id"])
         .order("due_date")
-        .execute()
     )
+
+    if status:
+        query = query.eq("status", status.lower())
+
+    if customer_id:
+        query = query.eq("customer_id", customer_id)
+
+    response = query.execute()
 
     invoices = []
     for row in response.data or []:
         customer_name = row.get("customers", {}).get("name") if row.get("customers") else None
-        invoices.append({**row, "customer_name": customer_name})
+        row_with_name = {**row, "customer_name": customer_name}
+
+        # Search filter applied in Python — matches customer name or invoice number
+        if search:
+            search_lower = search.lower()
+            name_match = customer_name and search_lower in customer_name.lower()
+            number_match = search_lower in (row.get("invoice_number") or "").lower()
+            if not name_match and not number_match:
+                continue
+
+        invoices.append(row_with_name)
 
     return invoices
 
@@ -325,4 +347,3 @@ async def upload_image(
         "skipped": skipped,
         "extracted_data": extracted_rows,
     }
-    
