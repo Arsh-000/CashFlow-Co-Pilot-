@@ -1,0 +1,5 @@
+﻿customer_name,phone,invoice_number,invoice_date,due_date,amount,paid_amount,status
+Annamalai Textiles,9876543210,INV-001,2025-01-15,2025-02-15,185000,0,unpaid
+Durai Mills,9444556677,INV-007,2025-01-10,2025-02-10,390000,0,unpaid
+Kandasamy Stores,8310082133,INV-008,2025-03-01,2025-04-01,75000,0,unpaid
+Periasamy Fabrics,9845012345,INV-003,2025-01-20,2025-02-20,320000,320000,paid

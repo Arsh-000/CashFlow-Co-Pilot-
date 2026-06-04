@@ -139,11 +139,17 @@ async def update_profile(
 
 @router.get("/account")
 async def get_account(current_user: dict = Depends(get_current_user)):
-    """Get current user's email from Supabase Auth."""
+    """Get current user account info — reads from auth middleware context."""
+    user_id = current_user["user_id"]
+
+    # Fetch email from Supabase auth.users via admin API
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"{AUTH_URL}/user",
-            headers=_auth_headers(current_user["token"]),
+            f"{AUTH_URL}/admin/users/{user_id}",
+            headers={
+                "apikey": SERVICE_KEY,
+                "Authorization": f"Bearer {SERVICE_KEY}",
+            },
         )
         data = response.json()
 
@@ -151,7 +157,7 @@ async def get_account(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not fetch account")
 
     return {
-        "user_id": data.get("id"),
+        "user_id": user_id,
         "email": data.get("email"),
         "created_at": data.get("created_at"),
     }
