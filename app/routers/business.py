@@ -168,17 +168,23 @@ async def change_password(
     body: ChangePassword,
     current_user: dict = Depends(get_current_user),
 ):
-    """Change password via Supabase Auth."""
+    """Change password via Supabase Auth admin API."""
     if len(body.new_password) < 8:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must be at least 8 characters",
         )
 
+    user_id = current_user["user_id"]
+
     async with httpx.AsyncClient() as client:
         response = await client.put(
-            f"{AUTH_URL}/user",
-            headers=_auth_headers(current_user["token"]),
+            f"{AUTH_URL}/admin/users/{user_id}",
+            headers={
+                "apikey": SERVICE_KEY,
+                "Authorization": f"Bearer {SERVICE_KEY}",
+                "Content-Type": "application/json",
+            },
             json={"password": body.new_password},
         )
         data = response.json()
@@ -186,7 +192,7 @@ async def change_password(
     if response.status_code != 200:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=data.get("msg") or "Password change failed",
+            detail=data.get("message") or data.get("msg") or "Password change failed",
         )
 
     return {"status": "password updated"}
