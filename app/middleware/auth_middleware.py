@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import time
 
 import httpx
 from fastapi import HTTPException, Request, status
@@ -12,10 +13,25 @@ logger = logging.getLogger(__name__)
 AUTH_USER_URL = f"{settings.SUPABASE_URL}/auth/v1/user"
 BUSINESSES_URL = f"{settings.SUPABASE_URL}/rest/v1/businesses"
 
-# In-memory cache: token_hash → business_id
-# Cuts auth overhead from ~400ms to ~200ms per request
-# Cache is per-process — clears on Railway redeploy (acceptable)
-_business_id_cache: dict[str, str] = {}
+# Cache structure: token_hash → {user_id, business_id, expires_at}
+# Token verified once, cached for 10 minutes
+# Clears on Railway redeploy (acceptable)
+_auth_cache: dict[str, dict] = {}
+CACHE_TTL_SECONDS = 600  # 10 minutes
+
+
+def _get_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _get_cached_user(token_hash: str) -> dict | None:
+    entry = _auth_cache.get(token_hash)
+    if not entry:
+        return None
+    if time.time() > entry["expires_at"]:
+        del _auth_cache[token_hash]
+        return None
+    return entry
 
 
 async def get_current_user(request: Request) -> dict:
@@ -28,8 +44,18 @@ async def get_current_user(request: Request) -> dict:
         )
 
     token = auth_header[7:].strip()
+    token_hash = _get_token_hash(token)
 
-    # Step 1 — verify token with Supabase Auth (always required, ~150-200ms)
+    # Return from cache if valid — skips both Supabase calls (~1 second saved)
+    cached = _get_cached_user(token_hash)
+    if cached:
+        return {
+            "user_id": cached["user_id"],
+            "business_id": cached["business_id"],
+            "token": token,
+        }
+
+    # Cache miss — verify token with Supabase Auth
     user_response = http_client.get(
         AUTH_USER_URL,
         headers={
@@ -51,42 +77,41 @@ async def get_current_user(request: Request) -> dict:
             detail="Invalid authentication credentials",
         )
 
-    # Step 2 — look up business_id (cached after first call)
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    # Look up business_id
+    service_key = settings.SUPABASE_SERVICE_KEY.strip()
+    business_response = http_client.get(
+        BUSINESSES_URL,
+        headers={
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+        },
+        params={
+            "select": "id",
+            "owner_id": f"eq.{user_id}",
+        },
+    )
 
-    if token_hash in _business_id_cache:
-        business_id = _business_id_cache[token_hash]
-        logger.debug(f"[auth] business_id from cache for user {user_id}")
-    else:
-        service_key = settings.SUPABASE_SERVICE_KEY.strip()
-        business_response = http_client.get(
-            BUSINESSES_URL,
-            headers={
-                "apikey": service_key,
-                "Authorization": f"Bearer {service_key}",
-            },
-            params={
-                "select": "id",
-                "owner_id": f"eq.{user_id}",
-            },
+    if business_response.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
         )
 
-        if business_response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-            )
+    businesses = business_response.json()
+    if not businesses:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
 
-        businesses = business_response.json()
-        if not businesses:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-            )
+    business_id = businesses[0]["id"]
 
-        business_id = businesses[0]["id"]
-        _business_id_cache[token_hash] = business_id
-        logger.debug(f"[auth] business_id cached for user {user_id}")
+    # Cache both user_id and business_id for 10 minutes
+    _auth_cache[token_hash] = {
+        "user_id": user_id,
+        "business_id": business_id,
+        "expires_at": time.time() + CACHE_TTL_SECONDS,
+    }
 
     return {
         "user_id": user_id,
