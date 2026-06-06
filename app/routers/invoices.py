@@ -148,7 +148,6 @@ async def mark_paid(
 ):
     business_id = current_user["business_id"]
 
-    # Fetch the invoice — verify it belongs to this business
     invoice_response = (
         supabase.table("invoices")
         .select("id, business_id, customer_id, amount, paid_amount, due_date, status")
@@ -165,23 +164,20 @@ async def mark_paid(
 
     invoice = invoice_response.data[0]
 
-    # Determine payment date
     if body.payment_date:
         payment_date = datetime.strptime(body.payment_date[:10], "%Y-%m-%d").date()
     else:
         payment_date = date.today()
 
-    # Compute new paid_amount and status
     new_paid_amount = float(invoice["paid_amount"] or 0) + body.amount_paid
     total_amount = float(invoice["amount"] or 0)
 
     if new_paid_amount >= total_amount:
         new_status = "paid"
-        new_paid_amount = total_amount  # cap at invoice amount
+        new_paid_amount = total_amount
     else:
         new_status = "partial"
 
-    # Update invoice via httpx (supabase client doesn't support update/upsert)
     days_from_due = _compute_days_from_due(invoice.get("due_date"), payment_date)
 
     async with httpx.AsyncClient() as client:
@@ -227,7 +223,7 @@ async def list_invoices(
 ):
     query = (
         supabase.table("invoices")
-        .select("*, customers(name)")
+        .select("*, customers(name, risk_level)")
         .eq("business_id", current_user["business_id"])
         .order("due_date")
     )
@@ -242,10 +238,15 @@ async def list_invoices(
 
     invoices = []
     for row in response.data or []:
-        customer_name = row.get("customers", {}).get("name") if row.get("customers") else None
-        row_with_name = {**row, "customer_name": customer_name}
+        customer = row.get("customers") or {}
+        customer_name = customer.get("name") if customer else None
+        customer_risk = customer.get("risk_level") if customer else None
+        row_with_name = {
+            **row,
+            "customer_name": customer_name,
+            "risk_level": customer_risk,  # ← expose customer risk on invoice
+        }
 
-        # Search filter applied in Python — matches customer name or invoice number
         if search:
             search_lower = search.lower()
             name_match = customer_name and search_lower in customer_name.lower()
@@ -256,6 +257,69 @@ async def list_invoices(
         invoices.append(row_with_name)
 
     return invoices
+
+
+# ── Payment history for a customer ────────────────────────────────────────────
+
+@router.get("/customers/{customer_id}/payment-history")
+async def get_payment_history(
+    customer_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Return payment_events for a specific customer.
+    Used by the frontend to show real avg_delay and payment history.
+    """
+    business_id = current_user["business_id"]
+
+    # Verify customer belongs to this business
+    customer_check = (
+        supabase.table("customers")
+        .select("id, name")
+        .eq("id", customer_id)
+        .eq("business_id", business_id)
+        .execute()
+    )
+
+    if not customer_check.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found",
+        )
+
+    # Fetch payment events for this customer
+    events_response = (
+        supabase.table("payment_events")
+        .select("id, invoice_id, payment_date, amount_paid, days_from_due_date, created_at")
+        .eq("customer_id", customer_id)
+        .eq("business_id", business_id)
+        .order("payment_date", desc=True)
+        .execute()
+    )
+
+    events = events_response.data or []
+
+    # Compute avg_days_from_due from real data
+    days_values = [
+        e["days_from_due_date"]
+        for e in events
+        if e.get("days_from_due_date") is not None
+    ]
+
+    avg_days_from_due = round(sum(days_values) / len(days_values)) if days_values else None
+    total_payments = len(events)
+    late_payments = sum(1 for d in days_values if d > 0)
+    on_time_payments = total_payments - late_payments
+
+    return {
+        "customer_id": customer_id,
+        "customer_name": customer_check.data[0]["name"],
+        "avg_days_from_due": avg_days_from_due,
+        "total_payments": total_payments,
+        "late_payments": late_payments,
+        "on_time_payments": on_time_payments,
+        "payment_events": events,
+    }
 
 
 ALLOWED_IMAGE_TYPES = {
@@ -282,13 +346,12 @@ async def upload_image(
         )
 
     image_bytes = await file.read()
-    if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
+    if len(image_bytes) > 10 * 1024 * 1024:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File too large. Maximum size is 10MB",
         )
 
-    # Extract invoice data from image
     try:
         extracted_rows = await extract_invoices_from_image(
             image_bytes=image_bytes,
@@ -306,7 +369,6 @@ async def upload_image(
             detail="No invoice data found in image",
         )
 
-    # Insert extracted rows using same logic as CSV upload
     business_id = current_user["business_id"]
     inserted = 0
     skipped = 0
